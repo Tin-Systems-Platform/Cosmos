@@ -49,42 +49,61 @@ public static class PartitionManager
         byte mbrSystemId,
         Guid gptType)
     {
+        // -------------------------------------------------------------
+        // DEBUG ENTRY: Log the incoming parameters to see if they make sense
+        // -------------------------------------------------------------
+        Console.WriteLine($"[PM.Create] Entry -> Start: {startSector}, Count: {sectorCount}, DeviceBlocks: {device.BlockCount}");
+
         // Start 0 aliases the table sector on both formats, so both writers
         // refuse it; check here too, so the reason is stated once at the top.
         if (sectorCount == 0 || startSector == 0)
         {
+            Console.WriteLine($"[PM.Create] FAIL: Invalid range boundaries (startSector={startSector}, sectorCount={sectorCount})");
             return false;
         }
+        
         // Non-wrapping bound (cf. Gpt.AddPartition): the naive sum wraps
         // 2^64 for large inputs and slips past the check.
         if (startSector >= device.BlockCount || sectorCount > device.BlockCount - startSector)
         {
+            Console.WriteLine($"[PM.Create] FAIL: Range exceeds device block count. Start: {startSector}, Needed: {sectorCount}, Device Max: {device.BlockCount}");
             return false;
         }
+        
         // Each writer refuses a range that overlaps another entry of its own
         // table (Gpt.AddPartition, Mbr.AddPartition), so the facade only
         // routes to the right one.
 
         if (Gpt.IsGpt(device))
         {
-            return Gpt.AddPartition(device, startSector, sectorCount, gptType);
+            Console.WriteLine("[PM.Create] Detected GPT disk scheme. Routing to Gpt.AddPartition...");
+            bool gptResult = Gpt.AddPartition(device, startSector, sectorCount, gptType);
+            Console.WriteLine($"[PM.Create] Gpt.AddPartition returned: {gptResult}");
+            return gptResult;
         }
 
         if (!Mbr.IsMbr(device))
         {
+            Console.WriteLine("[PM.Create] FAIL: Disk is neither GPT nor a valid MBR scheme.");
             return false;
         }
 
+        Console.WriteLine("[PM.Create] Detected MBR disk scheme. Scanning for a free slot...");
         int freeSlot = FindFreeMbrSlot(device);
         if (freeSlot < 0)
         {
+            Console.WriteLine("[PM.Create] FAIL: No free MBR primary slots available (all 4 are full).");
             return false;
         }
 
+        Console.WriteLine($"[PM.Create] Found free MBR slot [{freeSlot}]. Routing to Mbr.AddPartition...");
         // AddPartition owns the 32-bit on-disk field bound and reports it the
         // same way this does, so the facade does not pre-check it.
-        return Mbr.AddPartition(device, freeSlot, mbrSystemId, startSector, sectorCount);
+        bool mbrResult = Mbr.AddPartition(device, freeSlot, mbrSystemId, startSector, sectorCount);
+        Console.WriteLine($"[PM.Create] Mbr.AddPartition returned: {mbrResult}");
+        return mbrResult;
     }
+
 
     /// <summary>
     /// Add a logical partition to the disk's extended partition.
